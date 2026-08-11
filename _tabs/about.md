@@ -23,7 +23,7 @@ Hopefully something here helps you. If it does — that's enough.
 **Certifications**
 - CRTO — Certified Red Team Operator — Zero-Point Security
 - CPTS — Certified Penetration Testing Specialist — HackTheBox
-- CEH — Certified Ethical Hacker — EC-Council
+- CEH — Certified Ethical Hacker — EC-Council (Hahaha)
 - CCNA — Cisco Certified Network Associate
 - CWES - Certified Web Exploitation Specialist - HackTheBox (In Progress)
 
