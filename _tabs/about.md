@@ -4,8 +4,6 @@ icon: fas fa-info-circle
 order: 4
 ---
 
-# About
-
 I'm **3x0t1k** — a penetration tester with roughly 4 years of background in IT administration and network security engineering.
 
 It all started with a fake YouTube video where some guy supposedly turned off all the lights in his house from his phone. I was a kid, I had no idea it wasn't real — but something clicked. That moment sent me down a rabbit hole I never climbed out of.
