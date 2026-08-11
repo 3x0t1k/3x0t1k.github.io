@@ -82,3 +82,33 @@ The LDAP banner will usually give you the domain name directly:
 You now know the domain. You know there's a DC. Time to start pulling information.
  
 ---
+## The Goal
+ 
+Before we dive into tools and techniques, let's be clear about one thing:
+ 
+**Our objective is to authenticate to Active Directory.**
+ 
+Everything we do at this stage serves that single goal. Keep it in mind — it'll help you stay focused when you're deep in enumeration and losing the thread.
+ 
+Now, how you approach this depends entirely on what you have in hand. Two scenarios:
+ 
+1. **You have credentials** — a username, a password, a hash, anything that can authenticate you.
+2. **You have nothing** — no creds, no accounts, just a shell on a machine inside the network.
+This post covers scenario two. No credentials. Starting from zero.
+ 
+---
+ 
+## The Analogy
+ 
+Think of it like building a wooden house.
+ 
+- **Goal** — build the house (authenticate to AD)
+- **Material** — wood and nails (credentials in any form)
+- **Tool** — a hammer (something that lets you use those credentials — Kerbrute, Impacket, NetExec, etc.)
+You can have the best hammer in the world. Without material, you're not building anything. So the first task is always finding material — credentials in any shape or form that lets us authenticate.
+ 
+---
+ 
+## Where Credentials Come From
+ 
+When you have no accounts at all, your options fall into two categories: **exploit the protocol** or **find something left lying around**.
