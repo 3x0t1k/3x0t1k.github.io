@@ -207,6 +207,14 @@ hashcat -m 5600 hashes.txt /usr/share/wordlists/rockyou.txt
 
 If it cracks — you have a valid credential. If not, the hash may still be useful for relay attacks.
 
+> **LDAP signing and channel binding:** Before going deep into relay attacks — worth knowing that two settings on the DC directly affect whether NTLMv2 relay works at all. **LDAP signing** requires that LDAP traffic be cryptographically signed — if enabled, you can't relay captured hashes to LDAP. **LDAP channel binding** ties the authentication to the TLS channel — if enabled, relay to LDAPS is also blocked. In modern environments Microsoft has been pushing these on by default, but in practice many organisations still have them disabled or set to "if supported" rather than "required". You can check remotely:
+>
+> ```bash
+> nxc ldap 192.168.1.10 -u '' -p '' -M ldap-checker
+> ```
+>
+> If signing and channel binding are not enforced — relay attacks are viable and the hash you caught with Responder becomes significantly more useful than just cracking material.
+
 > Capturing hashes is just the beginning. LLMNR/NBT-NS poisoning, NTLMv2 relay, and coercion techniques are covered in depth in a separate post.
 
 ---
@@ -461,6 +469,16 @@ password      ✗ too short, no complexity — skip
 ```
 
 The more you know about the policy, the more surgical your spray becomes.
+
+> **One more thing:** What `--pass-pol` returns is the *default* domain policy. But Active Directory supports **Fine-Grained Password Policies (PSOs)** — separate policies applied to specific groups or individual accounts, independent of the domain default. In practice this means a group like Domain Admins or a set of service accounts could have a lockout threshold of 3 while everyone else has 5. You won't see this from an anonymous query. If you already have credentials, you can check for PSOs:
+>
+> ```bash
+> ldapsearch -x -H ldap://192.168.1.10 -D "r.nilson@corp.local" -w 'Winter2025!' \
+>   -b "CN=Password Settings Container,CN=System,DC=corp,DC=local" \
+>   "(objectClass=msDS-PasswordSettings)" msDS-LockoutThreshold msDS-MinimumPasswordLength msDS-PasswordSettingsPrecedence
+> ```
+>
+> If PSOs exist — pay attention to which accounts they apply to before you spray them. A tighter lockout threshold on a high-value account you're targeting is how you accidentally lock out the CEO.
 
 **Choosing passwords to spray:**
 
