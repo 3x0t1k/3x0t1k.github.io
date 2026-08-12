@@ -154,20 +154,10 @@ responder -I eth0 -wf
 
 ### Option 1 — LDAP Relay → Add User to Domain Admins
 
-If we want to relay to LDAP — first check whether LDAP signing and channel binding are enforced on the DC. These are separate mechanisms: LDAP signing protects traffic integrity, channel binding ties authentication to the TLS session. Both affect whether LDAP relay is viable:
-
-```bash
-nxc ldap 192.168.1.10 -u '' -p '' -M ldap-checker
-```
-
-### Option 1 — LDAP Relay → Add User to Domain Admins
-
 **Prerequisites:**
 - LDAP signing not enforced on DC
 - LDAP channel binding not enforced on DC
 - Relayed account has sufficient rights to modify group membership (e.g. Domain Admin)
-
-Check:
 
 ```bash
 nxc ldap 192.168.1.10 -u '' -p '' -M ldap-checker
