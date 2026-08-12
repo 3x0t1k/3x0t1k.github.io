@@ -134,17 +134,7 @@ If the hash belongs to a higher-privileged account — a sysadmin, a Domain Admi
 
 Let's say we caught `t.morgan` — and BloodHound shows he's a member of Domain Admins. The hash won't crack. Strong password, rockyou comes back empty.
 
-We don't need the plaintext. We can relay the authentication directly.
-
-### Prerequisite — Check LDAP Signing
-
-Before attempting LDAP relay, verify the target DC's LDAP signing and channel binding configuration — they are separate mechanisms with different impacts. LDAP signing protects the integrity of traffic, channel binding ties authentication to the TLS session. Relay viability depends on which of these are enforced and what authentication method is in play:
-
-```bash
-nxc ldap 192.168.1.10 -u '' -p '' -M ldap-checker
-```
-
-If LDAP relay is not viable, SMB relay may still be possible against targets where SMB signing is not required — check with `--gen-relay-list` as shown above.
+We don't need the plaintext. We can relay the authentication directly — but which protocol and target we relay to depends on what protections are in place.
 
 ### Setup
 
@@ -164,7 +154,26 @@ responder -I eth0 -wf
 
 ### Option 1 — LDAP Relay → Add User to Domain Admins
 
-This is the cleanest approach. We relay the DA's authentication to the DC over LDAP and use it to add a controlled account to the Domain Admins group — no shell, no noisy execution, just an LDAP write:
+If we want to relay to LDAP — first check whether LDAP signing and channel binding are enforced on the DC. These are separate mechanisms: LDAP signing protects traffic integrity, channel binding ties authentication to the TLS session. Both affect whether LDAP relay is viable:
+
+```bash
+nxc ldap 192.168.1.10 -u '' -p '' -M ldap-checker
+```
+
+### Option 1 — LDAP Relay → Add User to Domain Admins
+
+**Prerequisites:**
+- LDAP signing not enforced on DC
+- LDAP channel binding not enforced on DC
+- Relayed account has sufficient rights to modify group membership (e.g. Domain Admin)
+
+Check:
+
+```bash
+nxc ldap 192.168.1.10 -u '' -p '' -M ldap-checker
+```
+
+If neither is enforced — we relay the DA's authentication to the DC over LDAP and use it to add a controlled account to the Domain Admins group:
 
 ```bash
 impacket-ntlmrelayx -t ldap://192.168.1.10 -smb2support --escalate-user r.nilson
@@ -182,7 +191,18 @@ nxc smb 192.168.1.10 -u r.nilson -p 'Winter2025!' --groups
 
 ### Option 2 — SMB Relay → Shell via psexec
 
-Simpler but noisier. Relay the hash to another machine where the DA is a local admin and get a shell:
+**Prerequisites:**
+- SMB signing not required on the target machine
+- Relayed account is a local admin on the target machine
+- Target is different from the machine the authentication came from (can't relay back to same host)
+
+Check which targets don't require SMB signing:
+
+```bash
+nxc smb 192.168.1.0/24 --gen-relay-list targets.txt
+```
+
+Then relay:
 
 ```bash
 impacket-ntlmrelayx -tf targets.txt -smb2support -i
@@ -198,11 +218,23 @@ This works but can generate noisy log events — depending on what you execute a
 
 ### Option 3 — Shadow Credentials (Advanced)
 
+**Prerequisites:**
+- LDAP signing not enforced on DC
+- LDAP channel binding not enforced on DC
+- Relayed account has write access to `msDS-KeyCredentialLink` attribute on the target account
+- Target environment supports PKINIT (requires a CA or ADCS)
+
 If you want a lower-noise approach — no new users, no group membership changes — Shadow Credentials is worth knowing about. Through LDAP relay you add a `msDS-KeyCredentialLink` attribute to the target account, then authenticate as that user via PKINIT certificate-based auth without ever knowing their password. It's not footprint-free — modifying AD object attributes is a detectable operation — but it avoids the more obvious indicators of new accounts or group changes.
 
 This is a deeper topic covered in a dedicated post — but worth knowing it exists.
 
 ### ADCS — If Certificate Services Are Present
+
+**Prerequisites:**
+- AD CS deployed in the environment
+- HTTP enrollment endpoint present and accepting NTLM authentication
+- EPA (Extended Protection for Authentication) not enforced on the enrollment endpoint
+- Relayed account has enrollment rights
 
 If the environment has Active Directory Certificate Services (AD CS) deployed with a vulnerable HTTP enrollment endpoint that accepts relayable authentication, the attack surface expands significantly. This configuration opens up ESC8 — allowing you to relay a DA's authentication to the CA's HTTP enrollment endpoint and obtain a certificate on their behalf, usable for persistent authentication even after a password change. AD CS attacks require specific conditions to be met and are covered in a dedicated post.
 
