@@ -163,6 +163,8 @@ responder -I eth0 -wf
 nxc ldap 192.168.1.10 -u '' -p '' -M ldap-checker
 ```
 
+> **Worth checking for 2026:** New Active Directory deployments on Windows Server 2025 require LDAP signing by default, which blocks relay for signed SASL binds. Channel binding, however, defaults to "When supported" rather than "Required" — this specifically matters for NTLM or Simple Bind authentication over LDAPS (TLS), where signing alone doesn't apply. A client that doesn't offer a binding token can still authenticate over that path without one. Always verify the actual configuration on the DC rather than assuming based on OS version alone.
+
 If neither is enforced — we relay the DA's authentication to the DC over LDAP and use it to add a controlled account to the Domain Admins group:
 
 ```bash
@@ -212,7 +214,7 @@ This works but can generate noisy log events — depending on what you execute a
 - LDAP signing not enforced on DC
 - LDAP channel binding not enforced on DC
 - Relayed account has write access to `msDS-KeyCredentialLink` attribute on the target account
-- Target environment supports PKINIT (requires a CA or ADCS)
+- Target environment supports PKINIT and the resulting certificate-based authentication path is usable
 
 If you want a lower-noise approach — no new users, no group membership changes — Shadow Credentials is worth knowing about. Through LDAP relay you add a `msDS-KeyCredentialLink` attribute to the target account, then authenticate as that user via PKINIT certificate-based auth without ever knowing their password. It's not footprint-free — modifying AD object attributes is a detectable operation — but it avoids the more obvious indicators of new accounts or group changes.
 
@@ -226,7 +228,7 @@ This is a deeper topic covered in a dedicated post — but worth knowing it exis
 - EPA (Extended Protection for Authentication) not enforced on the enrollment endpoint
 - Relayed account has enrollment rights
 
-If the environment has Active Directory Certificate Services (AD CS) deployed with a vulnerable HTTP enrollment endpoint that accepts relayable authentication, the attack surface expands significantly. This configuration opens up ESC8 — allowing you to relay a DA's authentication to the CA's HTTP enrollment endpoint and obtain a certificate on their behalf, usable for persistent authentication even after a password change. AD CS attacks require specific conditions to be met and are covered in a dedicated post.
+If the environment has Active Directory Certificate Services (AD CS) deployed with a vulnerable HTTP enrollment endpoint that accepts relayable authentication, the attack surface expands significantly. This configuration opens up ESC8 — allowing you to relay a DA's authentication to the CA's HTTP enrollment endpoint and obtain a certificate on their behalf. That certificate can provide authentication independent of the victim's password and may remain usable after a password change, depending on certificate validity and revocation configuration. AD CS attacks require specific conditions to be met and are covered in a dedicated post.
 
 ---
 
@@ -297,7 +299,7 @@ Verify port 445 is no longer bound:
 netstat -ano | findstr :445
 ```
 
-**Step 3 — Set up a reverse port forward** to redirect inbound port 445 traffic to your relay tool (e.g. ntlmrelayx listening locally on 7445):
+**Step 3 — Set up a local TCP port proxy** to redirect inbound port 445 traffic to your relay tool (e.g. ntlmrelayx listening locally on 7445):
 
 ```powershell
 netsh interface portproxy add v4tov4 listenport=445 listenaddress=0.0.0.0 connectport=7445 connectaddress=127.0.0.1
@@ -354,9 +356,11 @@ Everything above describes techniques that work well in environments running old
 nxc smb 192.168.1.0/24 --gen-relay-list targets.txt
 ```
 
-This produces a list of hosts that NetExec considers suitable as SMB relay targets based on the observed SMB signing requirements. If the list comes back empty — signing is enforced across the board and you need to pivot to LDAP relay or other vectors.
+This produces a list of hosts that NetExec considers suitable as SMB relay targets based on the observed SMB signing requirements. If the list comes back empty — NetExec did not identify suitable SMB relay targets among the hosts checked. Reassess the SMB configuration and consider other relay targets or attack paths.
 
 The core concepts in this post remain valid — the attack surface has narrowed in modern environments, not disappeared.
+
+> Windows 11 24H2 and Windows Server 2025 also introduce SMB-specific NTLM blocking controls — so even an unsigned SMB target is not necessarily sufficient for a relay path if NTLM use itself is restricted on that machine.
 
 ---
 
