@@ -2,7 +2,7 @@
 title: "Initial Enumeration in Active Directory Environment"
 date: 2026-08-11
 categories: [Active Directory, Enumeration]
-tags: [active-directory, enumeration, recon, nmap, osint, linkedin2username, exiftool]
+tags: [active-directory, enumeration, recon, nmap, osint, responder, ldap, smb]
 ---
 
 ## Introduction
@@ -112,17 +112,90 @@ You can have the best hammer in the world. Without material, you're not building
 
 ## Part 1: No Credentials
 
-### Step 1 — Getting Valid Usernames
+### Step 1 — Low Hanging Fruit
 
-Before throwing anything at the DC, we need a list of valid usernames. Spraying garbage at Kerberos is noisy and inefficient — and in a real engagement, you're not there to trigger lockouts or alerts.
+Before doing anything noisy, check what the network is already giving away for free. Misconfigured services are extremely common in real environments and can hand you a username list — or even credentials — without a single authentication attempt.
 
-The first thing I do in a real pentest is **OSINT**. And the best source of corporate usernames is sitting in plain sight.
+#### LDAP Anonymous Bind
 
-#### Understanding the Login Format First
+Some DCs still allow anonymous LDAP queries. This means you can pull users, groups, and other directory objects without any credentials at all.
 
-Here's something people skip and then waste hours on: even if you have a list of real employee names, you can't do anything useful with it until you know how the company formats their logins.
+```bash
+# Check if anonymous bind is allowed
+ldapsearch -x -H ldap://192.168.1.10 -b "DC=corp,DC=local"
 
-Take a name like **Rick Nilson**. His AD username could be any of these:
+# Pull all users
+ldapsearch -x -H ldap://192.168.1.10 -b "DC=corp,DC=local" "(objectClass=user)" sAMAccountName
+```
+
+If this works — you already have a user list. Skip the OSINT section and move straight to password attacks.
+
+#### SMB Null Sessions
+
+Same idea on SMB. Null sessions allow unauthenticated access to certain SMB resources and can expose user and group information.
+
+```bash
+# Check for null session
+nxc smb 192.168.1.0/24 -u '' -p ''
+nxc smb 192.168.1.0/24 -u 'guest' -p ''
+
+# Enumerate shares
+nxc smb 192.168.1.10 -u '' -p '' --shares
+
+# Spider shares for interesting files
+nxc smb 192.168.1.10 -u '' -p '' -M spider_plus
+```
+
+People leave things in file shares. Credentials in scripts, passwords in Excel files, config files with plaintext secrets. It happens constantly in real environments.
+
+#### Other Services — FTP, Web, Databases
+
+Don't tunnel vision on AD. Scan the full network and check everything:
+
+```bash
+# Check FTP anonymous login
+nxc ftp 192.168.1.0/24 -u 'anonymous' -p 'anonymous'
+```
+
+Any service that exposes files or data without authentication is worth checking. Web applications running internally, exposed databases, unprotected network shares — all potential sources of credentials or usernames.
+
+---
+
+### Step 2 — Responder (Passive Credential Capture)
+
+If low hanging fruit didn't produce anything useful, the next step is to listen. Since we're on a Linux host with port 445 available, we can run Responder and passively capture authentication material from the network.
+
+```bash
+responder -I eth0 -wf
+```
+
+Responder poisons LLMNR, NBT-NS, and MDNS responses — when a machine on the network tries to resolve a hostname that doesn't exist in DNS, Responder answers and captures the authentication attempt. The result is an NTLMv2 hash.
+
+```
+[SMB] NTLMv2-SSP Hash : john.doe::CORP:a3f8c2d1e9b8...
+```
+
+Take it offline:
+
+```bash
+hashcat -m 5600 hashes.txt /usr/share/wordlists/rockyou.txt
+```
+
+If it cracks — you have a valid credential. If not, the hash may still be useful for relay attacks.
+
+> Capturing hashes is just the beginning. LLMNR/NBT-NS poisoning, NTLMv2 relay, and coercion techniques are covered in depth in a separate post.
+
+---
+
+### Step 3 — Building a Valid Username List (OSINT)
+
+If neither passive capture nor unauthenticated access produced results, we need to build a username list from scratch and start actively enumerating. But before generating any list, there's something critical to figure out first.
+
+#### Understanding the Login Format
+
+Even with a list of real employee names, you can't do anything useful until you know how the company formats their logins.
+
+Take **Rick Nilson**. His AD username could be any of these:
 
 ```
 rick.nilson
@@ -133,13 +206,13 @@ nilsonr
 rick
 ```
 
-Without knowing the format, you're generating five to ten variations per person and spraying all of them — which is slow, noisy, and likely to trigger lockouts. So before building any list, figure out the format first.
+Without knowing the format, you're generating five to ten variations per person and throwing all of them at the DC — noisy, slow, and likely to trigger lockouts. Figure out the format first, then build one clean list.
 
-#### LinkedIn — Names and Context
+Also worth noting: not every company follows standard patterns. In real engagements I've come across formats like `XXX000` — completely custom schemes that no wordlist or tool will guess. When you find a confirmed username through any means, study it carefully before assuming the format.
 
-LinkedIn is your primary source of employee names. People publicly list their employer, their role, their full name. For a pentester that's a goldmine — but names alone aren't enough, remember the format problem above.
+#### LinkedIn — Employee Names at Scale
 
-**linkedin2username** scrapes a company's LinkedIn page and generates username lists in every common format at once:
+LinkedIn gives you employee names in bulk. **linkedin2username** scrapes a company's LinkedIn and generates lists in every common format simultaneously:
 
 ```bash
 git clone https://github.com/initstring/linkedin2username
@@ -158,9 +231,9 @@ firstl.txt       → ricks@corp.local
 lastf.txt        → nilsonr@corp.local
 ```
 
-> **Note:** Requires a LinkedIn account. More connections = better results. LinkedIn caps at 1000 employees — use `--geoblast` or `--keywords` to bypass.
+Once you've confirmed the format from the company website, pick the right file. One clean list instead of five noisy ones.
 
-But you still have multiple format files and don't know which one is correct. That's where the next steps come in.
+> **Note:** Requires a LinkedIn account. More connections = better results. Use `--geoblast` or `--keywords` to bypass the 1000 employee cap.
 
 #### Company Website — Finding the Format
 
@@ -172,20 +245,20 @@ Medium and larger companies also often publish a management board or leadership 
 
 #### Google Dorks & PDF Metadata
 
-Another underrated source. Companies publish PDFs constantly — reports, presentations, brochures. Those documents often contain metadata including the username of whoever created or saved the file.
+Published documents are another underrated source. Companies put PDFs on their websites constantly — reports, presentations, brochures. Those PDFs often contain metadata, and that metadata sometimes includes the username of whoever created or saved the file.
 
 ```bash
-# Find PDFs published by the target
+# Google dork to find PDFs from a specific domain
 site:corp.com filetype:pdf
 ```
 
-Download a few, then pull the metadata:
+Download a few, then extract metadata:
 
 ```bash
 exiftool document.pdf
 ```
 
-Output:
+Output might look like this:
 
 ```
 File Name         : annual_report_2025.pdf
@@ -194,18 +267,28 @@ Creator           : Microsoft Word
 Producer          : Adobe PDF
 ```
 
-Username format confirmed. And you got a specific username as a bonus.
+There's your username format confirmed, and potentially a specific username as a bonus.
 
-#### Building the Final List
+#### theHarvester
 
-Once you know the format, generate a clean list. If you collected names manually (from LinkedIn browsing, the company website, or other sources), **username-anarchy** converts them:
+For broader OSINT — emails, subdomains, hosts — **theHarvester** is built into Kali and still relevant:
+
+```bash
+theHarvester -d corp.com -b google,bing,linkedin -l 500
+```
+
+It won't replace LinkedIn scraping for usernames, but it's useful for finding exposed email addresses and confirming the email format before you start enumerating.
+
+#### Generating the Final List
+
+Once you know the format, **username-anarchy** converts raw names to the right pattern:
 
 ```bash
 git clone https://github.com/urbanadventurer/username-anarchy
 ./username-anarchy --input-file names.txt --select-format first.last > usernames.txt
 ```
 
-Or a simple bash one-liner for `f.last` format:
+Or a simple bash one-liner for `f.last`:
 
 ```bash
 while IFS= read -r line; do
@@ -214,11 +297,3 @@ while IFS= read -r line; do
   echo "${first}.${last}@corp.local"
 done < names.txt
 ```
-
-For broader OSINT — emails, subdomains, exposed hosts — **theHarvester** is in Kali by default and still relevant:
-
-```bash
-theHarvester -d corp.com -b google,bing,linkedin -l 500
-```
-
-It won't replace LinkedIn scraping for usernames but it's useful for confirming the email format from exposed addresses and finding other attack surface.
