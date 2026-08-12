@@ -159,6 +159,24 @@ nxc ftp 192.168.1.0/24 -u 'anonymous' -p 'anonymous'
 
 Any service that exposes files or data without authentication is worth checking. Web applications running internally, exposed databases, unprotected network shares — all potential sources of credentials or usernames.
 
+#### Critical Vulnerabilities — Don't Skip Vuln Scanning
+
+While you're at it — don't forget to check for known critical vulnerabilities on the hosts you discover. A classic example is **MS17-010 (EternalBlue)**, which exploits a vulnerability in SMBv1 and gives you SYSTEM-level access without any credentials at all.
+
+```bash
+nxc smb 192.168.1.0/24 -M ms17-010
+```
+
+If a domain-joined machine is vulnerable, you land as SYSTEM on that host. From there you can dump local credentials and machine account hashes:
+
+```bash
+impacket-secretsdump LOCAL -target-ip 192.168.1.20
+```
+
+Since the machine is joined to the domain, you can use the machine account to query AD — which means you're no longer operating blind. EternalBlue is old but still found in real environments, especially on legacy infrastructure. Always check.
+
+> Obviously, exploiting production systems carries risk. Coordinate with your client and know your scope before pulling the trigger on anything this impactful.
+
 ---
 
 ### Step 2 — Responder (Passive Credential Capture)
