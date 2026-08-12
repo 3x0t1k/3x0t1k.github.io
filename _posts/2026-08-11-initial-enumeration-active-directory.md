@@ -1,5 +1,5 @@
 ---
-title: "Initial Enumeration in Active Directory Environment"
+title: "Active Directory Penetration Testing: How It All Starts (Enumeration & First Credentials)"
 date: 2026-08-11
 categories: [Active Directory, Enumeration]
 tags: [active-directory, enumeration, recon, nmap, osint, responder, ldap, smb]
