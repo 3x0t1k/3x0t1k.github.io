@@ -1,6 +1,6 @@
 ---
 title: "Active Directory Penetration Testing: Local Privilege Escalation - From User to SYSTEM"
-date: 2026-08-15
+date: 2026-08-12
 categories: [Active Directory, Privilege Escalation]
 tags: [privesc, seimpersonate, potato, printspoofer, rdp, mssql, xp_cmdshell, windows]
 ---
@@ -218,14 +218,14 @@ Note: sometimes these appear as `Disabled` in `whoami /priv`. This means the tok
 FullPowers.exe -c "cmd /c whoami /priv" -z
 ```
 
-Tool selection depends on OS version and build:
+Tool selection depends on OS version, build, and available prerequisites. The ranges below are approximate - always verify against the specific target:
 
-| Tool | Typical compatibility range |
+| Tool | Approximate compatibility |
 |------|----------|
-| JuicyPotato | Server 2016 and older |
-| PrintSpoofer | Server 2019, Windows 10 |
-| GodPotato | Server 2012-2022, Windows 8-11 |
-| SweetPotato | Windows 10, Server 2019 |
+| JuicyPotato | Server 2016 and older (requires specific CLSID) |
+| PrintSpoofer | Server 2019, Windows 10 (requires Print Spooler running) |
+| GodPotato | Server 2012-2022, Windows 8-11 (varies by build) |
+| SweetPotato | Windows 10, Server 2019 (varies by build) |
 
 Compatibility within these ranges varies by build and configuration - always verify.
 
@@ -253,7 +253,7 @@ The differences between tools are essentially in Step 1 and Step 2 - what endpoi
 
 ### Path 2 - SeBackupPrivilege (Shadow Copy Abuse)
 
-SeBackupPrivilege allows a process to bypass normal file security checks when performing backup operations. In practice this means tools using backup semantics (like `robocopy /b`) can read files that would otherwise be inaccessible due to ACLs or OS locks.
+SeBackupPrivilege allows a process to bypass normal file security checks when performing backup operations. In practice this means tools using backup semantics (like `robocopy /b`) can read files that would otherwise be inaccessible due to ACLs or OS locks. Note that SeBackupPrivilege alone doesn't grant the ability to create VSS snapshots - creating a shadow copy requires additional privileges or running as an administrator. The combination of SeBackupPrivilege and robocopy /b is useful for reading from an already-existing snapshot, or when elevated enough to create one.
 
 ```cmd
 :: Create a shadow copy via diskshadow
@@ -290,7 +290,7 @@ SeRestorePrivilege allows a process to bypass normal security checks when restor
 
 ### Path 4 - SeDebugPrivilege
 
-Allows a process to bypass many normal process-access restrictions, subject to protections such as PPL and Credential Guard. In practice this is primarily used for dumping LSASS.
+Allows a process to bypass many normal process-access restrictions, subject to protections such as PPL and Credential Guard. This enables a range of techniques including reading process memory, injecting into processes, and - the most common use in offensive contexts - dumping LSASS for credential material.
 
 **Option 1 - Direct dump via mimikatz:**
 
@@ -430,7 +430,7 @@ This is one of the most valuable things SYSTEM access gives you. Several locatio
 
 SAM is a local database that stores password hashes for local user accounts on the machine. It lives at `C:\Windows\System32\config\SAM` and is locked by the OS while running - you can't just copy it.
 
-To dump it you need SAM + SYSTEM hive together (SYSTEM contains the boot key used to encrypt SAM):
+To dump it you need SAM + SYSTEM hive together (SYSTEM contains the material from which the boot key is derived, which is used to decrypt SAM):
 
 ```cmd
 reg save HKLM\SAM C:\Temp\sam.save
@@ -463,7 +463,6 @@ LSA Secrets is a separate protected area in the registry (`HKLM\SECURITY\Policy\
 
 - Service account passwords (services configured to run as a domain account store the password here)
 - Machine account password
-- Sometimes autologon credentials
 
 secretsdump pulls these automatically from the SECURITY hive dump above. Look for entries like:
 
@@ -703,7 +702,7 @@ What it recovers:
 | Mail | Outlook, Thunderbird |
 | Databases | MySQL, PostgreSQL, Oracle connection passwords |
 | Sysadmin | PuTTY, WinSCP, FileZilla, MobaXterm |
-| Windows | Credential Manager, DPAPI-encrypted secrets |
+| Windows | Credential Manager entries, some DPAPI-protected secrets (where the master key is accessible) |
 | Wifi | Saved WiFi profiles with PSK |
 
 On a terminal server admins often use RDP sessions to manage infrastructure, and they may have WinSCP, PuTTY, or other tools installed with saved credentials. A sysadmin's saved SSH key or database password can open completely new paths.
