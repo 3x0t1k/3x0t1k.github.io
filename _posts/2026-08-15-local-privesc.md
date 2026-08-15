@@ -1,6 +1,6 @@
 ---
 title: "Active Directory Penetration Testing: Local Privilege Escalation - From User to SYSTEM"
-date: 2026-08-12
+date: 2026-08-15
 categories: [Active Directory, Privilege Escalation]
 tags: [privesc, seimpersonate, potato, printspoofer, rdp, mssql, xp_cmdshell, windows]
 ---
